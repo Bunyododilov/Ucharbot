@@ -1,1 +1,1 @@
-worker: python ucrar.py
+worker: python uchar.py
