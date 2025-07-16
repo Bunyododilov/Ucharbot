@@ -4,7 +4,7 @@ import subprocess
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler
 from telegram import ReplyKeyboardMarkup
 
-TOKEN = "8043474459:AAHpL6Ju0ZwpVoRqtC12sY-bU2b7yWV1d2A"
+TOKEN = "8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE"
 
 def start(update, context):
     keyboard = [['🟢 YouTube', '🟣 TikTok', '🟠 Instagram']]
