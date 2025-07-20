@@ -6,7 +6,7 @@ from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = ("8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE")
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 app = Flask(__name__)
