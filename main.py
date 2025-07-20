@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 # Start command
 def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text("🎬 Salom! Video havolasini yuboring (YouTube, TikTok, Instagram)...")
+await update.message.reply_text("🎬 Salom! Video havolasini yuboring (YouTube, TikTok, Instagram)...")
 
 # Callback handler for format buttons
 def button_handler(update: Update, context: CallbackContext) -> None:
@@ -51,26 +51,26 @@ def download_video(url: str, query, context: CallbackContext, format_id: str):
         with open(path, "rb") as video_file:
             context.bot.send_video(chat_id=query.message.chat_id, video=video_file)
     except Exception as e:
-        query.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
+    await query.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
     finally:
         if os.path.exists(path):
             os.remove(path)
 
 # URL handler
-def handle_url(update: Update, context: CallbackContext) -> None:
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     url = update.message.text
     if not re.match(r"https?://", url):
-        update.message.reply_text("❌ Iltimos, to'g'ri video havolasini yuboring.")
+     await update.message.reply_text("❌ Iltimos, to'g'ri video havolasini yuboring.")
         return
     try:
         formats = extract_formats(url)
         if not formats:
-            update.message.reply_text("❌ Formatlar topilmadi yoki video mavjud emas.")
+        await update.message.reply_text("❌ Formatlar topilmadi yoki video mavjud emas.")
             return
         reply_markup = format_buttons(url, formats)
-        update.message.reply_text("📥 Yuklab olish formatini tanlang:", reply_markup=reply_markup)
+    await update.message.reply_text("📥 Yuklab olish formatini tanlang:", reply_markup=reply_markup)
     except Exception as e:
-        update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
+     await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
 
 # Webhook endpoint
 @app.route("/webhook", methods=["POST"])
