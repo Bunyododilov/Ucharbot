@@ -4,23 +4,34 @@ import tempfile
 import yt_dlp
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackContext,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
+from threading import Thread
 
-TOKEN = ("8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE")
-BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
+TOKEN = "8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE"
 
+# Flask web server for uptime ping
 app = Flask(__name__)
 
-# Start command
-def start(update: Update, context: CallbackContext) -> None:
-     await update.message.reply_text("🎬 Salom! Video havolasini yuboring (YouTube, TikTok, Instagram)...")
+@app.route('/')
+def home():
+    return "Bot ishlayapti!"
 
-# Callback handler for format buttons
-def button_handler(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    query.answer()
-    url, format_code = query.data.split("|")
-    download_video(url, query, context, format_code)
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+Thread(target=run).start()
+
+# Telegram handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("🎬 Salom! Video havolasini yuboring (YouTube, TikTok, Instagram)...")
 
 def extract_formats(url: str):
     ydl_opts = {"quiet": True, "skip_download": True, "forcejson": True}
@@ -32,54 +43,50 @@ def extract_formats(url: str):
 def format_buttons(url: str, formats):
     buttons = []
     for fmt in formats:
-        label = f"{fmt['format_id']} - {fmt.get('ext')} - {int(fmt['filesize'])//1024} KB"
+        size = int(fmt['filesize']) // 1024
+        label = f"{fmt['format_id']} - {fmt.get('ext')} - {size} KB"
         buttons.append([InlineKeyboardButton(label, callback_data=f"{url}|{fmt['format_id']}")])
-    return InlineKeyboardMarkup(buttons[:10])  # Max 10 formats for brevity
+    return InlineKeyboardMarkup(buttons[:10])
 
-# Download video
-def download_video(url: str, query, context: CallbackContext, format_id: str):
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        path = tmp_file.name
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    url = update.message.text
+    if not re.match(r"https?://", url):
+        await update.message.reply_text("❌ Iltimos, to'g'ri video havolasini yuboring.")
+        return
+    try:
+        formats = extract_formats(url)
+        if not formats:
+            await update.message.reply_text("❌ Formatlar topilmadi yoki video mavjud emas.")
+            return
+        markup = format_buttons(url, formats)
+        await update.message.reply_text("📥 Yuklab olish formatini tanlang:", reply_markup=markup)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    url, format_id = query.data.split("|")
+    path = tempfile.mktemp()
+
     ydl_opts = {
         "format": format_id,
         "outtmpl": path,
         "quiet": True,
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        with open(path, "rb") as video_file:
-            context.bot.send_video(chat_id=query.message.chat_id, video=video_file)
+        with open(path, "rb") as f:
+            await query.message.reply_video(f)
     except Exception as e:
-          await query.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
+        await query.message.reply_text(f"❌ Yuklab olishda xatolik: {e}")
     finally:
         if os.path.exists(path):
             os.remove(path)
 
-# URL handler
-   async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    url = update.message.text
-    if not re.match(r"https?://", url):
-       await update.message.reply_text("❌ Iltimos, to'g'ri video havolasini yuboring.")
-        return
-    try:
-        formats = extract_formats(url)
-        if not formats:
-           await update.message.reply_text("❌ Formatlar topilmadi yoki video mavjud emas.")
-            return
-        reply_markup = format_buttons(url, formats)
-         await update.message.reply_text("📥 Yuklab olish formatini tanlang:", reply_markup=reply_markup)
-    except Exception as e:
-         await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
-
-# Webhook endpoint
-@app.route("/webhook", methods=["POST"])
-def webhook() -> str:
-    update = Update.de_json(request.get_json(force=True), Application.builder().token(TOKEN).build().bot)
-    application.process_update(update)
-    return "OK"
-
-# Bot setup
+# Bot application
 application = Application.builder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
@@ -87,18 +94,3 @@ application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_u
 
 if __name__ == '__main__':
     application.run_polling()
-# Fayl oxirida bo‘lishi kerak
-from flask import Flask
-from threading import Thread
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot ishlayapti!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-Thread(target=run).start()
-
