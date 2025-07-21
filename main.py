@@ -1,106 +1,97 @@
 import os
-import re
-import tempfile
 import yt_dlp
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from flask import Flask, request
+from telegram import (
+    Bot,
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
-from threading import Thread
+from dotenv import load_dotenv
 
-# Muhitdan token va webhook URLni olish
-TOKEN =("8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+load_dotenv()
 
-# Flask server (uptime uchun)
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
+
+bot = Bot(TOKEN)
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot ishlayapti!"
+# Kanalga a'zo bo'lganligini tekshiruvchi funksiya
+async def check_subscription(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except:
+        return False
 
-def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+# Start komandasi
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    subscribed = await check_subscription(user_id)
+    if not subscribed:
+        keyboard = [[InlineKeyboardButton("🔔 Kanalga obuna bo‘lish", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("❌ Koddan foydalanishdan oldin kanalimizga obuna bo‘ling.", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("✅ Video link yuboring (YouTube, TikTok, Instagram):")
 
-Thread(target=run_flask).start()
-
-# Telegram bot komandasi
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("🎬 Salom! Video havolasini yuboring (YouTube, TikTok, Instagram)...")
-
-# Format chiqarish
-def extract_formats(url: str):
-    ydl_opts = {"quiet": True, "skip_download": True, "forcejson": True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        formats = info.get("formats", [])
-        return [f for f in formats if f.get("filesize") and f.get("format_id")]
-
-# Formatlar tugmalari
-def format_buttons(url: str, formats):
-    buttons = []
-    for fmt in formats:
-        size = int(fmt['filesize']) // 1024
-        label = f"{fmt['format_id']} - {fmt.get('ext')} - {size} KB"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"{url}|{fmt['format_id']}")])
-    return InlineKeyboardMarkup(buttons[:10])
-
-# Foydalanuvchi yuborgan URLni qayta ishlash
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Video yuklash
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
-    if not re.match(r"https?://", url):
-        await update.message.reply_text("❌ Iltimos, to'g'ri video havolasini yuboring.")
+    user_id = update.effective_user.id
+
+    if not await check_subscription(user_id):
+        await update.message.reply_text("❌ Koddan foydalanishdan oldin kanalimizga obuna bo‘ling.")
         return
-    try:
-        formats = extract_formats(url)
-        if not formats:
-            await update.message.reply_text("❌ Formatlar topilmadi yoki video mavjud emas.")
-            return
-        markup = format_buttons(url, formats)
-        await update.message.reply_text("📥 Yuklab olish formatini tanlang:", reply_markup=markup)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Xatolik yuz berdi: {e}")
 
-# Tugmani bosganda video yuklab berish
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    url, format_id = query.data.split("|")
-    path = tempfile.mktemp()
-
-    ydl_opts = {
-        "format": format_id,
-        "outtmpl": path,
-        "quiet": True,
-    }
+    await update.message.reply_text("⏳ Yuklanmoqda, biroz kuting...")
 
     try:
+        ydl_opts = {
+            'format': 'best[ext=mp4]',
+            'outtmpl': 'video.%(ext)s',
+            'quiet': True,
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        with open(path, "rb") as f:
-            await query.message.reply_video(f)
-    except Exception as e:
-        await query.message.reply_text(f"❌ Yuklab olishda xatolik: {e}")
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
+            info = ydl.extract_info(url, download=True)
+            file_name = ydl.prepare_filename(info)
 
-# Telegram botni ishga tushirish
+        await update.message.reply_video(video=open(file_name, 'rb'), caption=info.get("title", "Video"))
+        os.remove(file_name)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Xatolik: {e}")
+
+# Webhookni o‘rnatish
+@app.route("/", methods=["GET", "HEAD"])
+def index():
+    return "Bot ishlamoqda!"
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put_nowait(update)
+    return "OK"
+
+# Bot application
 application = Application.builder().token(TOKEN).build()
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button_handler))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
-if __name__ == '__main__':
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        webhook_url=WEBHOOK_URL,
-    )
+# Webhook o‘rnatish
+async def set_webhook():
+    await bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
 
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(set_webhook())
+    application.run_polling = lambda *args, **kwargs: None  # to disable polling
+    app.run(host="0.0.0.0", port=8080)
