@@ -15,7 +15,7 @@ from telegram.ext import (
 from threading import Thread
 
 # Muhitdan token va webhook URLni olish
-TOKEN = os.environ.get("8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE")
+TOKEN =("8043474459:AAGdaiNeLpC4MDpdnXOtXueZJ9aGS7K9zLE")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # Flask server (uptime uchun)
