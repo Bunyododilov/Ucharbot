@@ -93,4 +93,5 @@ application.add_handler(CallbackQueryHandler(button_handler))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 
 if __name__ == '__main__':
-    application.run_polling()
+    application.run_webhook()
+    
