@@ -1,95 +1,58 @@
 import os
-import logging
+from flask import Flask, request
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-import yt_dlp
+from utils import download_video
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-CHANNEL_USERNAMES = os.getenv("CHANNEL_USERNAMES", "").split(",")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = Flask(__name__)
+bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-
-def is_user_subscribed(bot, user_id):
-    for channel in CHANNEL_USERNAMES:
-        try:
-            member = bot.get_chat_member(chat_id=channel.strip(), user_id=user_id)
-            if member.status not in ["member", "administrator", "creator"]:
-                return False
-        except Exception as e:
-            logger.error(f"Subscription check failed for {channel}: {e}")
-            return False
-    return True
-
-
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not is_user_subscribed(context.bot, user.id):
-        text = "Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:\n"
-        for ch in CHANNEL_USERNAMES:
-            text += f"👉 {ch.strip()}\n"
-        text += "Obuna bo‘lgach /start ni qayta yuboring."
+    await update.message.reply_text("🎥 Video yuklab beruvchi botga xush kelibsiz!\nYouTube, TikTok yoki Instagram havolasini yuboring.")
 
-        await update.message.reply_text(text)
-        return
+# Video link handler
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
+    chat_id = update.message.chat.id
 
-    await update.message.reply_text("Linkni yuboring: YouTube, TikTok yoki Instagram.")
+    if any(domain in url for domain in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com"]):
+        msg = await update.message.reply_text("⬇️ Yuklab olinmoqda, kuting...")
 
+        try:
+            filename, title = download_video(url)
+            with open(filename, "rb") as video:
+                await context.bot.send_video(chat_id=chat_id, video=video, caption=title)
 
-async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not is_user_subscribed(context.bot, user.id):
-        await start(update, context)
-        return
+            os.remove(filename)
+        except Exception as e:
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Xatolik yuz berdi: {str(e)}")
+    else:
+        await update.message.reply_text("❗ Iltimos, YouTube, TikTok yoki Instagram havolasini yuboring.")
 
-    url = update.message.text.strip()
+# Register handlers
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    ydl_opts = {
-        'format': 'mp4',
-        'outtmpl': 'video.%(ext)s',
-        'quiet': True,
-    }
+# Webhook
+@app.route("/webhook", methods=["POST"])
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    await bot_app.process_update(update)
+    return "ok"
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_url = info.get("url", None)
-            title = info.get("title", "video")
+# Webhook ni sozlash
+@app.route("/", methods=["GET"])
+async def set_webhook():
+    await bot_app.bot.set_webhook(url=WEBHOOK_URL + "/webhook")
+    return "Webhook set!"
 
-            await update.message.reply_video(
-                video=video_url,
-                caption=f"{title}",
-                supports_streaming=True
-            )
-    except Exception as e:
-        logger.error(f"Video yuklab olishda xatolik: {e}")
-        await update.message.reply_text("❌ Video yuklab bo‘lmadi. Linkni tekshiring.")
-
-
+# Run Flask app
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
-
-    async def on_startup(app):
-        await app.bot.set_webhook(WEBHOOK_URL)
-
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=10000,
-        webhook_url=WEBHOOK_URL,
-        on_startup=on_startup
-    )
-
+    app.run(port=10000)
