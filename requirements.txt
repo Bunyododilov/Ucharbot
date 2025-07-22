@@ -1,4 +1,4 @@
 python-telegram-bot==20.7
-Flask
+Flask==2.3.3
+yt-dlp==2024.05.27
 python-dotenv
-yt-dlp
