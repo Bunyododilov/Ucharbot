@@ -1,14 +1,12 @@
 services:
   - type: web
-    name: ucharbot
+    name: video-downloader-bot
     env: python
     plan: free
-    buildCommand: ""
+    buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
-        fromDotEnv: true
+        sync: false
       - key: WEBHOOK_URL
-        fromDotEnv: true
-      - key: CHANNEL_USERNAME
-        fromDotEnv: true
+        sync: false
