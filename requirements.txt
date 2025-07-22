@@ -1,4 +1,4 @@
-python-telegram-bot==20.8
-flask
-yt-dlp
+python-telegram-bot==20.7
+Flask
 python-dotenv
+yt-dlp
