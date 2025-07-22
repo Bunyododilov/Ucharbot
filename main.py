@@ -1,97 +1,95 @@
 import os
-import yt_dlp
-from flask import Flask, request
-from telegram import (
-    Bot,
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+import logging
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
 )
-from dotenv import load_dotenv
+import yt_dlp
 
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
+CHANNEL_USERNAMES = os.getenv("CHANNEL_USERNAMES", "").split(",")
 
-bot = Bot(TOKEN)
-app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Kanalga a'zo bo'lganligini tekshiruvchi funksiya
-async def check_subscription(user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except:
-        return False
 
-# Start komandasi
+def is_user_subscribed(bot, user_id):
+    for channel in CHANNEL_USERNAMES:
+        try:
+            member = bot.get_chat_member(chat_id=channel.strip(), user_id=user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        except Exception as e:
+            logger.error(f"Subscription check failed for {channel}: {e}")
+            return False
+    return True
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    subscribed = await check_subscription(user_id)
-    if not subscribed:
-        keyboard = [[InlineKeyboardButton("🔔 Kanalga obuna bo‘lish", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("❌ Koddan foydalanishdan oldin kanalimizga obuna bo‘ling.", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("✅ Video link yuboring (YouTube, TikTok, Instagram):")
+    user = update.effective_user
+    if not is_user_subscribed(context.bot, user.id):
+        text = "Botdan foydalanish uchun quyidagi kanallarga obuna bo‘ling:\n"
+        for ch in CHANNEL_USERNAMES:
+            text += f"👉 {ch.strip()}\n"
+        text += "Obuna bo‘lgach /start ni qayta yuboring."
 
-# Video yuklash
-async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    user_id = update.effective_user.id
-
-    if not await check_subscription(user_id):
-        await update.message.reply_text("❌ Koddan foydalanishdan oldin kanalimizga obuna bo‘ling.")
+        await update.message.reply_text(text)
         return
 
-    await update.message.reply_text("⏳ Yuklanmoqda, biroz kuting...")
+    await update.message.reply_text("Linkni yuboring: YouTube, TikTok yoki Instagram.")
+
+
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_user_subscribed(context.bot, user.id):
+        await start(update, context)
+        return
+
+    url = update.message.text.strip()
+
+    ydl_opts = {
+        'format': 'mp4',
+        'outtmpl': 'video.%(ext)s',
+        'quiet': True,
+    }
 
     try:
-        ydl_opts = {
-            'format': 'best[ext=mp4]',
-            'outtmpl': 'video.%(ext)s',
-            'quiet': True,
-        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_name = ydl.prepare_filename(info)
+            info = ydl.extract_info(url, download=False)
+            video_url = info.get("url", None)
+            title = info.get("title", "video")
 
-        await update.message.reply_video(video=open(file_name, 'rb'), caption=info.get("title", "Video"))
-        os.remove(file_name)
+            await update.message.reply_video(
+                video=video_url,
+                caption=f"{title}",
+                supports_streaming=True
+            )
     except Exception as e:
-        await update.message.reply_text(f"❌ Xatolik: {e}")
+        logger.error(f"Video yuklab olishda xatolik: {e}")
+        await update.message.reply_text("❌ Video yuklab bo‘lmadi. Linkni tekshiring.")
 
-# Webhookni o‘rnatish
-@app.route("/", methods=["GET", "HEAD"])
-def index():
-    return "Bot ishlamoqda!"
-
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    application.update_queue.put_nowait(update)
-    return "OK"
-
-# Bot application
-application = Application.builder().token(TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
-
-# Webhook o‘rnatish
-async def set_webhook():
-    await bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(set_webhook())
-    application.run_polling = lambda *args, **kwargs: None  # to disable polling
-    app.run(host="0.0.0.0", port=8080)
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
+
+    async def on_startup(app):
+        await app.bot.set_webhook(WEBHOOK_URL)
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        webhook_url=WEBHOOK_URL,
+        on_startup=on_startup
+    )
+
